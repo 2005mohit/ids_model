@@ -75,7 +75,7 @@ if uploaded_file:
         # Keep only required features
          df = df[selected_columns]
 
-        st.success("✅ File uploaded successfully! Processing data...")
+    st.success("✅ File uploaded successfully! Processing data...")
 
         # Predictions
         results = []
