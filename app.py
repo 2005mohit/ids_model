@@ -8,98 +8,74 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 import lightgbm as lgb
 
-# =====================
-# Load Pipeline + Feature Names
-# =====================
-@st.cache_resource
-def load_pipeline():
-    try:
-        pipeline = joblib.load("IDS_Pipeline_joblib.pkl")
-        feature_names = joblib.load("features_names.pkl")
-        return pipeline, feature_names
-    except Exception as e:
-        st.error(f"Error loading pipeline: {e}")
-        st.stop()
+# ================== Load Pipeline ==================
+st.set_page_config(page_title="Intrusion Detection System", layout="wide")
+st.title("🛡️ Intrusion Detection System (IDS)")
 
-pipeline, feature_names = load_pipeline()
+# Load dict pipeline
+pipeline = joblib.load("IDS_Pipeline_joblib.pkl")
 
-# =====================
-# Streamlit UI
-# =====================
-st.set_page_config(page_title="Cyber IDS Dashboard", layout="wide")
+# Extract objects
+model1 = pipeline['model1']       # Binary classifier
+scaler1 = pipeline['scaler1']
+imputer1 = pipeline['imputer1']
 
-# Cyber theme
-st.markdown("""
-<style>
-body {
-    background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
-    color: #ffffff;
-    font-family: 'Courier New', monospace;
-}
-h1, h2, h3, h4 {
-    color: #00ffe5;
-}
-.stButton>button {
-    background-color: #00ffe5;
-    color: #000;
-    font-weight: bold;
-    border-radius: 10px;
-}
-.stDownloadButton>button {
-    background-color: #ff00ff;
-    color: #fff;
-    font-weight: bold;
-    border-radius: 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+model2 = pipeline['model2']       # Attack type classifier
+scaler2 = pipeline['scaler2']
+imputer2 = pipeline['imputer2']
 
-# Header
-st.markdown("""
-<div style='text-align:center; padding:20px'>
-    <h1>🔐 Intrusion Detection System (IDS)</h1>
-    <p style='color:#a0f7f7;'>Detect BENIGN or ATTACK network traffic automatically from CSV input</p>
-</div>
-""", unsafe_allow_html=True)
+le_attack = pipeline['le_attack'] # Label encoder
+feature_names = pipeline['feature_names']
 
-# =====================
-# Upload Section
-# =====================
-with st.container():
-    st.markdown("<h3 style='color:#00ffe5'>📁 Upload Your CSV File</h3>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Choose CSV file with network traffic features", type="csv")
-    
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
 
-            # Validate columns
-            missing_features = [f for f in feature_names if f not in df.columns]
-            if missing_features:
-                st.error(f"CSV is missing required features: {missing_features}")
-            else:
-                predictions = []
-                for i in range(df.shape[0]):
-                    features = df[feature_names].iloc[i].values
-                    pred = pipeline.predict(features)
-                    predictions.append(pred)
-                df["Prediction"] = predictions
+# ================== Prediction Function ==================
+def predict_sample(sample_df):
+    """Predict whether traffic is normal or an attack"""
+    # Binary classification
+    X1 = imputer1.transform(sample_df)
+    X1 = scaler1.transform(X1)
+    pred1 = model1.predict(X1)
 
-                # Highlight predictions
-                def highlight_prediction(row):
-                    color = '#00ff7f' if row['Prediction']=='BENIGN' else '#ff4d4d'
-                    return ['background-color: {}'.format(color) if col=='Prediction' else '' for col in row.index]
+    if pred1[0] == 0:
+        return "✅ Normal Traffic"
+    else:
+        # Attack type classification
+        X2 = imputer2.transform(sample_df)
+        X2 = scaler2.transform(X2)
+        pred2 = model2.predict(X2)
+        attack_label = le_attack.inverse_transform(pred2)[0]
+        return f"🚨 Attack Detected: {attack_label}"
 
-                st.markdown("<h3 style='color:#00ffe5'>🛡️ Predictions (Preview)</h3>", unsafe_allow_html=True)
-                st.dataframe(df[["Prediction"]].head(20).style.apply(highlight_prediction, axis=1), height=400)
 
-                # Download full results
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Full Predictions CSV",
-                    data=csv,
-                    file_name="IDS_Predictions.csv",
-                    mime="text/csv"
-                )
-        except Exception as e:
-            st.error(f"Error processing CSV: {e}")
+# ================== Streamlit UI ==================
+uploaded_file = st.file_uploader("📂 Upload CSV file with network traffic data", type=["csv"])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+
+    # Check for missing features
+    missing_cols = [col for col in feature_names if col not in df.columns]
+    if missing_cols:
+        st.error(f"❌ Missing required features in uploaded CSV: {missing_cols}")
+    else:
+        # Keep only required features
+        df = df[feature_names]
+
+        st.success("✅ File uploaded successfully! Processing data...")
+
+        # Predictions
+        results = []
+        for _, row in df.iterrows():
+            sample = pd.DataFrame([row.values], columns=feature_names)
+            result = predict_sample(sample)
+            results.append(result)
+
+        df["Prediction"] = results
+
+        # Show results
+        st.subheader("🔎 Predictions")
+        st.dataframe(df)
+
+        # Option to download results
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Download Predictions", csv, "IDS_Predictions.csv", "text/csv")
