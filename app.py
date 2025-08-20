@@ -65,17 +65,17 @@ if uploaded_file:
     if missing_cols:
         st.error(f"❌ Missing required features in uploaded CSV: {missing_cols}")
     else:
-         selected_columns = []
-         for f_native, f_norm in zip(feature_names, feature_names_normalized):
-             # Find matching df column for each feature
-             match = [col for col in df.columns if col == f_norm]
-             if match:
+        selected_columns = []
+        for f_native, f_norm in zip(feature_names, feature_names_normalized):
+            # Find matching df column for each feature
+            match = [col for col in df.columns if col == f_norm]
+            if match:
                 selected_columns.append(match[0])
-            
+        
         # Keep only required features
-         df = df[selected_columns]
+        df = df[selected_columns]
 
-    st.success("✅ File uploaded successfully! Processing data...")
+        st.success("✅ File uploaded successfully! Processing data...")
 
         # Predictions
         results = []
