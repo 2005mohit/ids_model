@@ -52,27 +52,25 @@ uploaded_file = st.file_uploader("📂 Upload CSV file with network traffic data
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-  
-    # Strip whitespace and standardize column names in user file
+    
+    # Normalize column names, check missing as you have already
     df.columns = df.columns.str.strip().str.lower()
-
-    # Similarly normalize expected feature names
     feature_names_normalized = [col.strip().lower() for col in feature_names]
-
-    # Check for missing features
     missing_cols = [orig for orig, norm in zip(feature_names, feature_names_normalized) if norm not in df.columns]
     
     if missing_cols:
-        st.error(f"❌ Missing required features in uploaded CSV: {missing_cols}")
+        st.error(f"❌ Missing required features: {missing_cols}")
     else:
+        # Sanitize input to remove infinities & large values
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df = df.clip(lower=-1e10, upper=1e10)
+
+        # Proceed with selecting features, predictions, etc.
         selected_columns = []
         for f_native, f_norm in zip(feature_names, feature_names_normalized):
-            # Find matching df column for each feature
             match = [col for col in df.columns if col == f_norm]
             if match:
                 selected_columns.append(match[0])
-        
-        # Keep only required features
         df = df[selected_columns]
 
         st.success("✅ File uploaded successfully! Processing data...")
