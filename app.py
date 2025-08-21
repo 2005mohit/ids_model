@@ -145,6 +145,7 @@ if uploaded_file:
     else:
         try:
             df = pd.read_csv(temp_path)
+            df.columns = [col.strip() for col in df.columns] 
         except Exception as e:
             st.error(f"❌ Failed to read CSV: {e}")
             st.stop()
