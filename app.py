@@ -2,14 +2,16 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import joblib
+import pathlib
+import tempfile
+import os
+from collections import defaultdict
+
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 import lightgbm as lgb
-import tempfile
-import os
-from collections import defaultdict
 
 # Optional: PyShark for PCAP support
 try:
@@ -17,11 +19,17 @@ try:
 except ImportError:
     pyshark = None
 
-# ================== Load Pipeline ==================
+# ================== Streamlit Config ==================
 st.set_page_config(page_title="Intrusion Detection System", layout="wide")
 st.title("🛡️ Intrusion Detection System (IDS)")
 
-pipeline = joblib.load("IDS_Pipeline_joblib.pkl")
+# ================== Load Pipeline Safely ==================
+MODEL_PATH = pathlib.Path(__file__).parent / "IDS_Pipeline_joblib.pkl"
+try:
+    pipeline = joblib.load(MODEL_PATH)
+except Exception as e:
+    st.error(f"❌ Could not load model pipeline: {e}")
+    st.stop()
 
 model1 = pipeline['model1']
 scaler1 = pipeline['scaler1']
@@ -37,64 +45,75 @@ feature_names = pipeline['feature_names']
 # ================== PCAP to Feature Extraction ==================
 def parse_pcap_to_features(pcap_file):
     if not pyshark:
-        st.error("PyShark not installed. Run: pip install pyshark")
+        st.error("❌ PyShark not installed. Please add `pyshark` in requirements.txt")
         return pd.DataFrame(columns=feature_names)
 
-    cap = pyshark.FileCapture(pcap_file, only_summaries=False)
-    flows = defaultdict(lambda: {
-        'forward_packets': [],
-        'timestamps': [],
-    })
+    try:
+        cap = pyshark.FileCapture(pcap_file, only_summaries=False)
+        flows = defaultdict(lambda: {'forward_packets': [], 'timestamps': []})
 
-    for pkt in cap:
-        try:
-            src = pkt.ip.src
-            dst = pkt.ip.dst
-            sport = pkt[pkt.transport_layer].srcport if hasattr(pkt, 'transport_layer') else '0'
-            dport = pkt[pkt.transport_layer].dstport if hasattr(pkt, 'transport_layer') else '0'
-            protocol = pkt.transport_layer if hasattr(pkt, 'transport_layer') else 'UNKNOWN'
+        for pkt in cap:
+            try:
+                src = pkt.ip.src
+                dst = pkt.ip.dst
+                sport = getattr(pkt[pkt.transport_layer], "srcport", "0") if pkt.transport_layer else "0"
+                dport = getattr(pkt[pkt.transport_layer], "dstport", "0") if pkt.transport_layer else "0"
+                protocol = pkt.transport_layer if pkt.transport_layer else "UNKNOWN"
 
-            flow_key = f"{src}-{dst}-{sport}-{dport}-{protocol}"
-            size = int(pkt.length)
-            time = float(pkt.sniff_timestamp)
+                flow_key = f"{src}-{dst}-{sport}-{dport}-{protocol}"
+                size = int(pkt.length)
+                time = float(pkt.sniff_timestamp)
 
-            flows[flow_key]['timestamps'].append(time)
-            flows[flow_key]['forward_packets'].append(size)
-        except:
-            continue
+                flows[flow_key]['timestamps'].append(time)
+                flows[flow_key]['forward_packets'].append(size)
+            except Exception:
+                continue
 
-    rows = []
-    for flow_key, data in flows.items():
-        row = {name: 0 for name in feature_names}
-        row['Destination Port'] = flow_key.split('-')[3]
-        if data['timestamps']:
-            row['Flow Duration'] = (max(data['timestamps']) - min(data['timestamps'])) * 1000
-        if data['forward_packets']:
-            row['Total Fwd Packets'] = len(data['forward_packets'])
-            row['Total Length of Fwd Packets'] = sum(data['forward_packets'])
-            row['Fwd Packet Length Max'] = max(data['forward_packets'])
-            row['Fwd Packet Length Min'] = min(data['forward_packets'])
-            row['Fwd Packet Length Mean'] = sum(data['forward_packets']) / len(data['forward_packets'])
-        rows.append(row)
+        cap.close()  # ✅ release resources
 
-    df = pd.DataFrame(rows, columns=feature_names)
-    df.fillna(0, inplace=True)
-    return df
+        rows = []
+        for flow_key, data in flows.items():
+            row = {name: 0 for name in feature_names}
+            row['Destination Port'] = flow_key.split('-')[3]
+            if data['timestamps']:
+                row['Flow Duration'] = (max(data['timestamps']) - min(data['timestamps'])) * 1000
+            if data['forward_packets']:
+                row['Total Fwd Packets'] = len(data['forward_packets'])
+                row['Total Length of Fwd Packets'] = sum(data['forward_packets'])
+                row['Fwd Packet Length Max'] = max(data['forward_packets'])
+                row['Fwd Packet Length Min'] = min(data['forward_packets'])
+                row['Fwd Packet Length Mean'] = sum(data['forward_packets']) / len(data['forward_packets'])
+            rows.append(row)
+
+        df = pd.DataFrame(rows, columns=feature_names)
+        df.fillna(0, inplace=True)
+        return df
+
+    except Exception as e:
+        st.error(f"❌ Error parsing PCAP file: {e}")
+        return pd.DataFrame(columns=feature_names)
 
 # ================== Prediction ==================
-def predict_sample(sample_df):
-    X1 = imputer1.transform(sample_df)
-    X1 = scaler1.transform(X1)
-    pred1 = model1.predict(X1)
+def predict_samples(df):
+    try:
+        X1 = imputer1.transform(df)
+        X1 = scaler1.transform(X1)
+        pred1 = model1.predict(X1)
 
-    if pred1[0] == 0:
-        return "✅ Normal Traffic"
-    else:
-        X2 = imputer2.transform(sample_df)
-        X2 = scaler2.transform(X2)
-        pred2 = model2.predict(X2)
-        attack_label = le_attack.inverse_transform(pred2)[0]
-        return f"🚨 Attack Detected: {attack_label}"
+        results = []
+        for i, p in enumerate(pred1):
+            if p == 0:
+                results.append("✅ Normal Traffic")
+            else:
+                X2 = imputer2.transform([df.iloc[i]])
+                X2 = scaler2.transform(X2)
+                pred2 = model2.predict(X2)
+                attack_label = le_attack.inverse_transform(pred2)[0]
+                results.append(f"🚨 Attack Detected: {attack_label}")
+        return results
+    except Exception as e:
+        st.error(f"❌ Prediction failed: {e}")
+        return ["Error"] * len(df)
 
 # ================== UI ==================
 uploaded_file = st.file_uploader(
@@ -114,11 +133,15 @@ if uploaded_file:
         if df.empty:
             st.error("❌ Failed to extract data from PCAP/PCAPNG.")
             st.stop()
-        st.info("PCAP/PCAPNG converted to feature dataframe.")
+        st.info("✅ PCAP/PCAPNG converted to feature dataframe.")
     else:
-        df = pd.read_csv(temp_path)
+        try:
+            df = pd.read_csv(temp_path)
+        except Exception as e:
+            st.error(f"❌ Failed to read CSV: {e}")
+            st.stop()
 
-    # Ensure all model features exist
+    # Ensure features match
     missing_cols = [col for col in feature_names if col not in df.columns]
     if missing_cols:
         st.warning(f"⚠️ Missing features filled with 0: {missing_cols}")
@@ -131,11 +154,7 @@ if uploaded_file:
 
     st.success("✅ File processed successfully! Running IDS detection...")
 
-    predictions = []
-    for _, row in df.iterrows():
-        sample = pd.DataFrame([row.values], columns=feature_names)
-        predictions.append(predict_sample(sample))
-
+    predictions = predict_samples(df)
     df["Prediction"] = predictions
 
     st.subheader("🔎 Predictions")
@@ -143,4 +162,3 @@ if uploaded_file:
 
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button("⬇️ Download Predictions", csv, "IDS_Predictions.csv", "text/csv")
-
