@@ -19,6 +19,10 @@ try:
 except ImportError:
     pyshark = None
 
+# ================== Fix for Streamlit Cloud (TShark Path) ==================
+TSHARK_PATH = "/usr/bin/tshark"   # Streamlit Cloud pe tshark install hota hai yahan
+os.environ["TSHARK_PATH"] = TSHARK_PATH
+
 # ================== Streamlit Config ==================
 st.set_page_config(page_title="Intrusion Detection System", layout="wide")
 st.title("🛡️ Intrusion Detection System (IDS)")
@@ -49,7 +53,11 @@ def parse_pcap_to_features(pcap_file):
         return pd.DataFrame(columns=feature_names)
 
     try:
-        cap = pyshark.FileCapture(pcap_file, only_summaries=False)
+        cap = pyshark.FileCapture(
+            pcap_file,
+            only_summaries=False,
+            tshark_path=TSHARK_PATH  # ✅ important fix
+        )
         flows = defaultdict(lambda: {'forward_packets': [], 'timestamps': []})
 
         for pkt in cap:
