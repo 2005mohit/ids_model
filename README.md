@@ -105,8 +105,22 @@ The proposed system uses a **two-stage pipeline** combining:
 
 ### Pipeline Wrapper
 
-- Both models, scalers, imputers, label encoders, and feature names are wrapped within `IDSPipeline` class.
-- The entire pipeline saved as `IDS_Pipeline.pkl` for deployment.
+The two-stage intrusion detection system is wrapped in a single `IDSPipeline` class, integrating preprocessing and models for streamlined predictions.
+
+- **Components:**  
+  - Preprocessing: two `SimpleImputer` and two `StandardScaler` instances (one each for binary and multi-class models).  
+  - Models: `XGBClassifier` (binary) and `LGBMClassifier` (multi-class).  
+  - Label encoder to decode multi-class attack labels.  
+  - Feature names to ensure consistent input.
+
+- **Workflow:**  
+  1. Input features are preprocessed (imputed + scaled) for binary classification to predict benign vs. attack.  
+  2. Flows predicted as attacks are further preprocessed and passed to multi-class classifier to identify attack type.  
+  3. Results from both models are combined and returned in a user-friendly format.
+
+- **Deployment:**  
+  The entire pipeline is saved as `IDS_Pipeline.pkl` for easy loading and use in the Streamlit app, enabling real-time network traffic detection and classification through a consistent, end-to-end interface.
+
 
 ### Web Application
 
