@@ -150,30 +150,18 @@ if uploaded_file:
             st.stop()
 
     # ================== Fix for Missing Features & 0 Value Issue ==================
-    # Normalize column names (strip, lowercase, remove BOM)
+    # Normalize CSV column names
     df.columns = df.columns.str.strip().str.replace('\ufeff', '', regex=True).str.lower()
     feature_names_norm = [col.strip().lower() for col in feature_names]
 
-    # Map CSV columns to expected features
-    col_mapping = {}
-    for f in feature_names_norm:
-        matches = [c for c in df.columns if c == f]
-        if matches:
-            col_mapping[matches[0]] = f
+    fixed_df = pd.DataFrame()
+    for f_norm, f_orig in zip(feature_names_norm, feature_names):
+        if f_norm in df.columns:
+            fixed_df[f_orig] = df[f_norm]   # ✅ actual CSV values
+        else:
+            fixed_df[f_orig] = 0           # ✅ only if truly missing
 
-    # Apply mapping
-    df = df.rename(columns={old: new for old, new in col_mapping.items()})
-
-    # Add only truly missing columns
-    missing_cols = [f for f in feature_names_norm if f not in df.columns]
-    if missing_cols:
-        st.warning(f"⚠️ Missing features filled with 0: {missing_cols}")
-        for col in missing_cols:
-            df[col] = 0
-
-    # Reorder according to feature_names
-    df = df[[c.lower() for c in feature_names_norm]]
-    df.columns = feature_names  # restore original names
+    df = fixed_df.copy()
 
     # Handle infinities and NaN
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
