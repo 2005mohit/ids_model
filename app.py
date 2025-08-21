@@ -46,9 +46,6 @@ imputer2 = pipeline['imputer2']
 le_attack = pipeline['le_attack']
 feature_names = pipeline['feature_names']
 
-feature_names = [f.strip() for f in feature_names]
-st.write("Feature names in pipeline:", feature_names)
-
 # ================== PCAP to Feature Extraction ==================
 def parse_pcap_to_features(pcap_file):
     if not pyshark:
@@ -148,38 +145,42 @@ if uploaded_file:
     else:
         try:
             df = pd.read_csv(temp_path)
-            df.columns = [col.strip() for col in df.columns] 
-            st.write("CSV columns after strip:", df.columns.tolist())
-
         except Exception as e:
             st.error(f"❌ Failed to read CSV: {e}")
             st.stop()
 
-    
-    # Ensure features match
-    try:
-       df = pd.read_csv(temp_path)
-       df.columns = [c.strip() for c in df.columns]  # ONLY STRIP SPACES
-    except Exception as e:
-       st.error(f"❌ Failed to read CSV: {e}")
-       st.stop()
-    
-    missing_cols = [col for col in feature_names if col not in df.columns]
+    # ================== Fix for Missing Features & 0 Value Issue ==================
+    # Normalize column names (strip, lowercase, remove BOM)
+    df.columns = df.columns.str.strip().str.replace('\ufeff', '', regex=True).str.lower()
+    feature_names_norm = [col.strip().lower() for col in feature_names]
+
+    # Map CSV columns to expected features
+    col_mapping = {}
+    for f in feature_names_norm:
+        matches = [c for c in df.columns if c == f]
+        if matches:
+            col_mapping[matches[0]] = f
+
+    # Apply mapping
+    df = df.rename(columns={old: new for old, new in col_mapping.items()})
+
+    # Add only truly missing columns
+    missing_cols = [f for f in feature_names_norm if f not in df.columns]
     if missing_cols:
         st.warning(f"⚠️ Missing features filled with 0: {missing_cols}")
         for col in missing_cols:
             df[col] = 0
 
-# Reorder columns exactly as feature_names
-    df = df[feature_names]
-   
-    st.write("Final columns used:", df.columns.tolist())
+    # Reorder according to feature_names
+    df = df[[c.lower() for c in feature_names_norm]]
+    df.columns = feature_names  # restore original names
 
+    # Handle infinities and NaN
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
 
+    # ================== Run Predictions ==================
     st.success("✅ File processed successfully! Running IDS detection...")
-
     predictions = predict_samples(df)
     df["Prediction"] = predictions
 
