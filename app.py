@@ -6,29 +6,25 @@ import pathlib
 import tempfile
 import os
 from collections import defaultdict
-
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 import lightgbm as lgb
 
-# Optional: PyShark for PCAP support
 try:
     import pyshark
 except ImportError:
     pyshark = None
 
-# ================== Fix for Streamlit Cloud (TShark Path) ==================
-TSHARK_PATH = "/usr/bin/tshark"   # Streamlit Cloud pe tshark install hota hai yahan
+TSHARK_PATH = "/usr/bin/tshark"
 os.environ["TSHARK_PATH"] = TSHARK_PATH
 
-# ================== Streamlit Config ==================
 st.set_page_config(page_title="Intrusion Detection System", layout="wide")
 st.title("🛡️ Intrusion Detection System (IDS)")
 
-# ================== Load Pipeline Safely ==================
 MODEL_PATH = pathlib.Path(__file__).parent / "IDS_Pipeline_joblib.pkl"
+
 try:
     pipeline = joblib.load(MODEL_PATH)
 except Exception as e:
@@ -38,28 +34,23 @@ except Exception as e:
 model1 = pipeline['model1']
 scaler1 = pipeline['scaler1']
 imputer1 = pipeline['imputer1']
-
 model2 = pipeline['model2']
 scaler2 = pipeline['scaler2']
 imputer2 = pipeline['imputer2']
-
 le_attack = pipeline['le_attack']
 feature_names = pipeline['feature_names']
+feature_names = [f.strip() for f in feature_names]
 
-# ================== PCAP to Feature Extraction ==================
+# Debug print for pipeline feature names
+st.write("Feature names in pipeline:", feature_names)
+
 def parse_pcap_to_features(pcap_file):
     if not pyshark:
         st.error("❌ PyShark not installed. Please add `pyshark` in requirements.txt")
         return pd.DataFrame(columns=feature_names)
-
     try:
-        cap = pyshark.FileCapture(
-            pcap_file,
-            only_summaries=False,
-            tshark_path=TSHARK_PATH  # ✅ important fix
-        )
+        cap = pyshark.FileCapture(pcap_file, only_summaries=False, tshark_path=TSHARK_PATH)
         flows = defaultdict(lambda: {'forward_packets': [], 'timestamps': []})
-
         for pkt in cap:
             try:
                 src = pkt.ip.src
@@ -67,18 +58,14 @@ def parse_pcap_to_features(pcap_file):
                 sport = getattr(pkt[pkt.transport_layer], "srcport", "0") if pkt.transport_layer else "0"
                 dport = getattr(pkt[pkt.transport_layer], "dstport", "0") if pkt.transport_layer else "0"
                 protocol = pkt.transport_layer if pkt.transport_layer else "UNKNOWN"
-
                 flow_key = f"{src}-{dst}-{sport}-{dport}-{protocol}"
                 size = int(pkt.length)
                 time = float(pkt.sniff_timestamp)
-
                 flows[flow_key]['timestamps'].append(time)
                 flows[flow_key]['forward_packets'].append(size)
             except Exception:
                 continue
-
-        cap.close()  # ✅ release resources
-
+        cap.close()
         rows = []
         for flow_key, data in flows.items():
             row = {name: 0 for name in feature_names}
@@ -92,22 +79,18 @@ def parse_pcap_to_features(pcap_file):
                 row['Fwd Packet Length Min'] = min(data['forward_packets'])
                 row['Fwd Packet Length Mean'] = sum(data['forward_packets']) / len(data['forward_packets'])
             rows.append(row)
-
         df = pd.DataFrame(rows, columns=feature_names)
         df.fillna(0, inplace=True)
         return df
-
     except Exception as e:
         st.error(f"❌ Error parsing PCAP file: {e}")
         return pd.DataFrame(columns=feature_names)
 
-# ================== Prediction ==================
 def predict_samples(df):
     try:
         X1 = imputer1.transform(df)
         X1 = scaler1.transform(X1)
         pred1 = model1.predict(X1)
-
         results = []
         for i, p in enumerate(pred1):
             if p == 0:
@@ -123,9 +106,8 @@ def predict_samples(df):
         st.error(f"❌ Prediction failed: {e}")
         return ["Error"] * len(df)
 
-# ================== UI ==================
 uploaded_file = st.file_uploader(
-    "📂 Upload network traffic file (CSV/PCAP/PCAPNG)", 
+    "📂 Upload network traffic file (CSV/PCAP/PCAPNG)",
     type=["csv", "pcap", "pcapng"]
 )
 
@@ -135,7 +117,6 @@ if uploaded_file:
         f.write(uploaded_file.getbuffer())
 
     ext = os.path.splitext(uploaded_file.name)[-1].lower()
-
     if ext in [".pcap", ".pcapng"]:
         df = parse_pcap_to_features(temp_path)
         if df.empty:
@@ -145,30 +126,26 @@ if uploaded_file:
     else:
         try:
             df = pd.read_csv(temp_path)
+            df.columns = [col.strip() for col in df.columns]
+            st.write("CSV columns after strip:", df.columns.tolist())
         except Exception as e:
             st.error(f"❌ Failed to read CSV: {e}")
             st.stop()
 
-    # ================== Fix for Missing Features & 0 Value Issue ==================
-    # Normalize CSV column names
-    df.columns = df.columns.str.strip().str.replace('\ufeff', '', regex=True).str.lower()
-    feature_names_norm = [col.strip().lower() for col in feature_names]
+    missing_cols = [col for col in feature_names if col not in df.columns]
+    if missing_cols:
+        st.warning(f"⚠️ Missing features filled with 0: {missing_cols}")
+        for col in missing_cols:
+            df[col] = 0
 
-    fixed_df = pd.DataFrame()
-    for f_norm, f_orig in zip(feature_names_norm, feature_names):
-        if f_norm in df.columns:
-            fixed_df[f_orig] = df[f_norm]   # ✅ actual CSV values
-        else:
-            fixed_df[f_orig] = 0           # ✅ only if truly missing
+    df = df[feature_names]
+    st.write("Final columns used:", df.columns.tolist())
 
-    df = fixed_df.copy()
-
-    # Handle infinities and NaN
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
 
-    # ================== Run Predictions ==================
     st.success("✅ File processed successfully! Running IDS detection...")
+
     predictions = predict_samples(df)
     df["Prediction"] = predictions
 
