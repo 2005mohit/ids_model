@@ -1,5 +1,21 @@
 # ML-Based Intrusion Detection System
 
+# Project Overview
+- The ML-Based Intrusion Detection System leverages machine learning techniques to detect and classify network attacks in real-time using the CICIDS 2017 dataset.
+- It combines a robust two-stage pipeline with state-of-the-art classifiers to distinguish benign from malicious traffic and identify specific attack types.
+- The system is deployed as an interactive web application enabling easy analysis of live or recorded network traffic.
+
+***
+
+## Live Demo
+
+Try the ML-Based Intrusion Detection System live on Streamlit Cloud:  
+[https://your-app-link.streamlit.app](https://idsmodel-96ktoyjywpqclugq8w8muy.streamlit.app/)
+
+Upload your network traffic data and get real-time intrusion detection and attack classification.
+
+***
+
 ## 1. Dataset
 
 The project utilizes the **CICIDS 2017** dataset, a benchmark dataset widely adopted for network intrusion detection research. This dataset comprises labeled network traffic flows capturing various attack scenarios and benign network activity.
@@ -119,7 +135,7 @@ The two-stage intrusion detection system is wrapped in a single `IDSPipeline` cl
   3. Results from both models are combined and returned in a user-friendly format.
 
 - **Deployment:**  
-  The entire pipeline is saved as `IDS_Pipeline.pkl` for easy loading and use in the Streamlit app, enabling real-time network traffic detection and classification through a consistent, end-to-end interface.
+  The entire pipeline is saved as `IDS_Pipeline_joblib.pkl` for easy loading and use in the Streamlit app, enabling real-time network traffic detection and classification through a consistent, end-to-end interface.
 
 
 ### Web Application
