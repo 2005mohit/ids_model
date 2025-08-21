@@ -151,13 +151,21 @@ if uploaded_file:
             st.stop()
 
     # Ensure features match
-    missing_cols = [col for col in feature_names if col not in df.columns]
+    def normalize(col):
+        return col.strip().lower().replace(' ', '_')
+
+    df.columns = [normalize(c) for c in df.columns]
+    feature_names_norm = [normalize(c) for c in feature_names]
+
+    missing_cols = [c for c in feature_names_norm if c not in df.columns]
     if missing_cols:
         st.warning(f"⚠️ Missing features filled with 0: {missing_cols}")
-        for col in missing_cols:
-            df[col] = 0
-
-    df = df[feature_names]
+        for c_norm in missing_cols:
+            df[c_norm] = 0
+            
+        # Align columns strictly as per normalized feature names
+    df = df[feature_names_norm]
+    
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
 
