@@ -5,6 +5,7 @@ import joblib
 import pathlib
 import tempfile
 import os
+import subprocess
 from collections import defaultdict
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -13,21 +14,24 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 import lightgbm as lgb
 
-# Optional: PyShark for PCAP support
+# ================== Optional: PyShark ==================
 try:
     import pyshark
 except ImportError:
     pyshark = None
 
-# ================== Fix for Streamlit Cloud (TShark Path) ==================
-TSHARK_PATH = "/usr/bin/tshark"   # Streamlit Cloud pe tshark install hota hai yahan
-os.environ["TSHARK_PATH"] = TSHARK_PATH
+# ================== Fix for Streamlit Cloud ==================
+TSHARK_PATH = "/usr/bin/tshark"
+if pyshark and os.path.exists(TSHARK_PATH):
+    os.environ["TSHARK_PATH"] = TSHARK_PATH
+else:
+    pyshark = None
 
 # ================== Streamlit Config ==================
 st.set_page_config(page_title="Intrusion Detection System", layout="wide")
 st.title("🛡️ Intrusion Detection System (IDS)")
 
-# ================== Load Pipeline Safely ==================
+# ================== Load Pipeline ==================
 MODEL_PATH = pathlib.Path(__file__).parent / "IDS_Pipeline_joblib.pkl"
 try:
     pipeline = joblib.load(MODEL_PATH)
@@ -46,17 +50,13 @@ imputer2 = pipeline['imputer2']
 le_attack = pipeline['le_attack']
 feature_names = pipeline['feature_names']
 
-# ================== PCAP to Feature Extraction ==================
-def parse_pcap_to_features(pcap_file):
-    if not pyshark:
-        st.error("❌ PyShark not installed. Please add `pyshark` in requirements.txt")
-        return pd.DataFrame(columns=feature_names)
-
+# ================== PCAP Parsing with PyShark ==================
+def parse_pcap_with_pyshark(pcap_file):
     try:
         cap = pyshark.FileCapture(
             pcap_file,
             only_summaries=False,
-            tshark_path=TSHARK_PATH  # ✅ important fix
+            tshark_path=TSHARK_PATH
         )
         flows = defaultdict(lambda: {'forward_packets': [], 'timestamps': []})
 
@@ -77,7 +77,7 @@ def parse_pcap_to_features(pcap_file):
             except Exception:
                 continue
 
-        cap.close()  # ✅ release resources
+        cap.close()
 
         rows = []
         for flow_key, data in flows.items():
@@ -98,8 +98,55 @@ def parse_pcap_to_features(pcap_file):
         return df
 
     except Exception as e:
-        st.error(f"❌ Error parsing PCAP file: {e}")
+        st.warning(f"⚠️ PyShark parsing failed: {e}")
         return pd.DataFrame(columns=feature_names)
+
+# ================== PCAP Parsing with Tshark/Dumpcap ==================
+def parse_pcap_with_tshark(pcap_file):
+    try:
+        csv_out = pcap_file + ".csv"
+        cmd = [
+            "tshark", "-r", pcap_file,
+            "-T", "fields",
+            "-e", "frame.time_epoch",
+            "-e", "ip.src",
+            "-e", "ip.dst",
+            "-e", "frame.len",
+            "-E", "header=y", "-E", "separator=,"
+        ]
+        with open(csv_out, "w") as f:
+            subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True)
+
+        df = pd.read_csv(csv_out)
+        # NOTE: Map tshark fields → IDS features
+        # Minimal mapping example:
+        df_features = pd.DataFrame(columns=feature_names)
+        df_features["Destination Port"] = 0
+        df_features["Flow Duration"] = 0
+        df_features["Total Fwd Packets"] = 1
+        df_features["Total Length of Fwd Packets"] = df["frame.len"]
+        df_features["Fwd Packet Length Max"] = df["frame.len"]
+        df_features["Fwd Packet Length Min"] = df["frame.len"]
+        df_features["Fwd Packet Length Mean"] = df["frame.len"]
+        df_features.fillna(0, inplace=True)
+        return df_features
+
+    except Exception as e:
+        st.warning(f"⚠️ Tshark/Dumpcap parsing failed: {e}")
+        return pd.DataFrame(columns=feature_names)
+
+# ================== Hybrid PCAP Parser ==================
+def parse_pcap_to_features(pcap_file):
+    if pyshark:
+        df = parse_pcap_with_pyshark(pcap_file)
+        if not df.empty:
+            return df
+    # Fallback to Tshark
+    df = parse_pcap_with_tshark(pcap_file)
+    if not df.empty:
+        return df
+    st.error("❌ Could not parse PCAP/PCAPNG. Please upload CSV instead.")
+    return pd.DataFrame(columns=feature_names)
 
 # ================== Prediction ==================
 def predict_samples(df):
@@ -139,7 +186,6 @@ if uploaded_file:
     if ext in [".pcap", ".pcapng"]:
         df = parse_pcap_to_features(temp_path)
         if df.empty:
-            st.error("❌ Failed to extract data from PCAP/PCAPNG.")
             st.stop()
         st.info("✅ PCAP/PCAPNG converted to feature dataframe.")
     else:
@@ -149,7 +195,6 @@ if uploaded_file:
             st.error(f"❌ Failed to read CSV: {e}")
             st.stop()
 
-    # Ensure features match
     missing_cols = [col for col in feature_names if col not in df.columns]
     if missing_cols:
         st.warning(f"⚠️ Missing features filled with 0: {missing_cols}")
