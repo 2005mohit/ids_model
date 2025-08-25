@@ -1,2 +1,3 @@
+debconf-utils
 tshark
-dumpcap
+wireshark-common
