@@ -1,9 +1,13 @@
+# Core app dependencies
 streamlit
 pandas
 numpy
 scikit-learn
 joblib
+
+# ML models
 xgboost
 lightgbm
-pyshark
 
+# Optional PCAP parser (handled safely in app.py)
+pyshark
