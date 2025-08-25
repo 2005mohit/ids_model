@@ -1,1 +1,3 @@
+debconf-utils
 tshark
+wireshark-common
