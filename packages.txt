@@ -1,3 +1,2 @@
-# System dependencies for PCAP parsing
 tshark
 wireshark-common
